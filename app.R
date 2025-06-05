@@ -22,7 +22,6 @@ ui <- dashboardPage(
   dashboardBody(
     tags$head(
       tags$style(HTML("
-        .content-wrapper { overflow: hidden !important; }
         .small-box { font-size: 18px; }
         .skin-blue .main-header .logo { background-color: #2C3E50; color: #fff; }
       "))
@@ -35,11 +34,17 @@ ui <- dashboardPage(
                 valueBoxOutput("box3")
               ),
               fluidRow(
+                style = "display: flex; flex-direction: row; gap: 30px",
+                selectInput("prov", "Provinces", width = 200, c("Toutes les provinces", unique(data$DPS))),
+                selectInput("zs", "Zone de santé", width = 200, c("Toutes les zones", unique(data$ZS))),
+                selectInput("annee", "Année", width = 200, c("Toutes les années", 2022, 2023, 2024, 2025)),
+                selectInput("mois", "Mois", width = 200, c("Tous les mois", month.name)),
+              ),
+              fluidRow(
                 box(title = "Évolution des ventes", width = 12, plotlyOutput("plot1"))
               )
       ),
       tabItem("stats",
-              style="overflow-y: scroll",
               uiOutput("province_cards")
       ),
       tabItem("table",

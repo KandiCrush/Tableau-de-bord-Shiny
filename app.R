@@ -3,16 +3,10 @@ library(bslib)
 library(shinydashboard)
 library(plotly)
 library(DT)
+library(readxl)
 
 # Data
-set.seed(123)
-data <- data.frame(
-  Date = seq(as.Date("2024-01-01"), as.Date("2024-01-30"), by = "day"),
-  Ventes = round(runif(30, 100, 1000)),
-  Clients = round(runif(30, 10, 50))
-)
-
-View(data)
+data <- read_excel("data/polioData.xlsx")
 
 # UI
 ui <- dashboardPage(
@@ -28,6 +22,7 @@ ui <- dashboardPage(
   dashboardBody(
     tags$head(
       tags$style(HTML("
+        .content-wrapper { overflow: hidden !important; }
         .small-box { font-size: 18px; }
         .skin-blue .main-header .logo { background-color: #2C3E50; color: #fff; }
       "))
@@ -44,9 +39,8 @@ ui <- dashboardPage(
               )
       ),
       tabItem("stats",
-              fluidRow(
-                box(title = "Statistiques détaillées", width = 12, plotlyOutput("plot2"))
-              )
+              style="overflow-y: scroll",
+              uiOutput("province_cards")
       ),
       tabItem("table",
               fluidRow(
@@ -59,12 +53,11 @@ ui <- dashboardPage(
 
 # SERVER
 server <- function(input, output, session) {
-  
   # KPIs
   output$box1 <- renderValueBox({
     valueBox(
-      value = sum(data$Ventes),
-      subtitle = "Total Ventes",
+      value = nrow(data),
+      subtitle = "Total Cas",
       icon = icon("shopping-cart"),
       color = "teal"
     )
@@ -72,8 +65,8 @@ server <- function(input, output, session) {
   
   output$box2 <- renderValueBox({
     valueBox(
-      value = sum(data$Clients),
-      subtitle = "Total Clients",
+      value = length(unique(data$DPS)),
+      subtitle = "Total provinces",
       icon = icon("users"),
       color = "blue"
     )
@@ -81,30 +74,53 @@ server <- function(input, output, session) {
   
   output$box3 <- renderValueBox({
     valueBox(
-      value = round(mean(data$Ventes), 1),
-      subtitle = "Vente Moyenne / Jour",
+      value = length(unique(data$ZS)),
+      subtitle = "Nombre de zone de santé",
       icon = icon("chart-line"),
       color = "navy"
     )
   })
   
   # Evolution des ventes
-  output$plot1 <- renderPlotly({
-    plot_ly(data, x = ~Date, y = ~Ventes, type = "scatter", mode = "lines+markers",
-            line = list(color = '#18BC9C')) %>%
-      layout(title = "Évolution des ventes")
-  })
+  # output$plot1 <- renderPlotly({
+  #   plot_ly(data, x = ~Date, y = ~Ventes, type = "scatter", mode = "lines+markers",
+  #           line = list(color = '#18BC9C')) %>%
+  #     layout(title = "Évolution des ventes")
+  # })
   
   # Graphique distribution des clients
-  output$plot2 <- renderPlotly({
-    plot_ly(data, x = ~Clients, type = "histogram", nbinsx = 10,
-            marker = list(color = '#2C3E50')) %>%
-      layout(title = "Distribution des clients par jour")
+  output$province_cards <- renderUI({
+    provinces <- unique(data$DPS)
+    box_list <- lapply(provinces, function(prov) {
+      prov_data <- data[data$DPS == prov, ]
+      box(
+        title = prov,
+        width = 4,
+        height = 200,
+        status = "primary",
+        solidHeader = TRUE,
+        # valueBox(
+        #   value = nrow(prov_data),
+        #   subtitle = "Nombre de cas",
+        #   icon = icon("virus"),
+        #   color = "blue"
+        # ),
+        # valueBox(
+        #   value = length(unique(prov_data$ZS)),
+        #   subtitle = "Zones de santé",
+        #   icon = icon("hospital"),
+        #   color = "teal"
+        # )
+      )
+    })
+
+    fluidRow(box_list)
   })
+  
   
   # Table pour afficher les données
   output$datatable <- renderDT({
-    datatable(data, options = list(pageLength = 10, autoWidth = TRUE))
+    datatable(data, options = list(pageLength = 7, autoWidth = TRUE, scrollX = TRUE, scrollY = TRUE, scrollCollapse=TRUE))
   })
 }
 

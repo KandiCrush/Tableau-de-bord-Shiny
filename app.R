@@ -11,13 +11,7 @@ df$DateDebutParalysie <- as.Date(df$DateDebutParalysie)
 tableau_croise <- read_excel("data/polioData.xlsx", sheet = 3)
 
 # ------------------------------------------------------------------------------------------------------------------
-library(dplyr)
-library(ggplot2)
-
-# Suppose que tableau_croise = ton read_excel(..., sheet = 3)
 df_stat <- tableau_croise
-
-# On va créer deux colonnes
 df_stat$Année <- NA
 df_stat$Province <- NA
 
@@ -63,6 +57,7 @@ filtres_ui <- function() {
 
 
 
+# UI --------------------------------------------------------------------------------------------------------------------
 ui <- dashboardPage(
   dashboardHeader(title = "PLTS"),
   dashboardSidebar(
@@ -84,7 +79,7 @@ ui <- dashboardPage(
     "))
     ),
     filtres_ui(),
-    # Accueil ------------------------------------------------------------------------------------------------------------------
+      # Accueil ------------------------------------------------------------------------------------------------------------------
     tabItems(
       # Page Accueil (KPIs)
       tabItem(tabName = "accueil",
@@ -116,11 +111,11 @@ ui <- dashboardPage(
                 )
               )
       ),
-      # Graphiques trimestriels ------------------------------------------------------------------------------------------------------------------
+      # Graphiques trimestriels -------------------------------------------------------------------------------------------
       tabItem(tabName = "stats",
               uiOutput("province_cards")
       ),
-      # Page Graphiques ------------------------------------------------------------------------------------------------------------------
+      # Page Graphiques ---------------------------------------------------------------------------------------------------
       tabItem(tabName = "graphs",
         # Graphiques
         fluidRow(
@@ -146,7 +141,7 @@ ui <- dashboardPage(
         )
       ),
       
-      # Page DataTable ------------------------------------------------------------------------------------------------------------------
+      # Page DataTable ----------------------------------------------------------------------------------------------------
       tabItem(tabName = "data",
               box(
                 title = "Table des Données",
@@ -161,6 +156,7 @@ ui <- dashboardPage(
   )
 )
 
+# Server ------------------------------------------------------------------------------------------------------------------
 server <- function(input, output, session) {
   
   # Mise à jour dynamique des ZS selon la province
@@ -205,6 +201,7 @@ server <- function(input, output, session) {
     data
   })
   
+  # Tableau de bord -------------------------------------------------------------------------------------------------------
   # KPIs dynamiques
   output$n_cas <- renderValueBox({
     valueBox(nrow(data_filtre()), "Nombre de cas", icon = icon("user-injured"), color = "blue")
@@ -224,10 +221,7 @@ server <- function(input, output, session) {
     pourcent <- ifelse(total > 0, round(100 * hommes / total, 1), 0)
     valueBox(paste0(pourcent, " %"), "% Garçons", icon = icon("mars"), color = "red")
   })
-  # output$delai_moyen <- renderValueBox({
-  #   delai <- round(mean(data_filtre()[["délai entre début Paralysie et Prél."]], na.rm=TRUE),1)
-  #   valueBox(delai, "Délai moyen (jours)", icon = icon("clock"), color = "green", width = 2)
-  # })
+
   
   # Calcul des KPIs
   kpi_df <- reactive({
@@ -265,24 +259,65 @@ server <- function(input, output, session) {
     data.frame(KPI = noms, Valeur = valeurs)
   })
   
-  # Graphiques trimestriels
+  # Graphiques trimestriels -----------------------------------------------------------------------------------------------
   output$province_cards <- renderUI({
-    provinces <- unique(df$DPS)
-    box_list<-lapply(provinces, function(prov) {
-      prov_data <- df[df$DPS == prov, ]
+    provinces <- unique(df_stat_clean$Province)
+    annees <- sort(unique(df_stat_clean$Année))
+    
+    box_list <- lapply(provinces, function(prov) {
+      data_plot <- df_stat_clean %>% filter(Province == prov, Année %in% annees)
+      
+      plot_output_id <- paste0("bar_", gsub(" ", "_", prov))
+      
       box(
         title = prov,
-        width = 4,
-        height = 200,
-        # status = "primary", 
-        # solidHeader = TRUE,
-        # Ici tu mets le contenu de la box, ex :
-        paste("Statistiques pour la province :", prov)
+        width = 12,
+        plotOutput(plot_output_id, height = 200)
       )
     })
+    
+    do.call(fluidRow, box_list)
   })
   
-  # Graphiques
+  # output dynamique pour chaque province
+  observe({
+    provinces <- unique(df_stat_clean$Province)
+    annees <- sort(unique(df_stat_clean$Année))
+    
+    for (prov in provinces) {
+      local({
+        province <- prov
+        plot_output_id <- paste0("bar_", gsub(" ", "_", province))
+        data_plot <- df_stat_clean %>% filter(Province == province, Année %in% annees)
+        
+        output[[plot_output_id]] <- renderPlot({
+          jours <- as.numeric(data_plot$`# moyen de jours entre le 2ième prélèvement et la réception au point de transit (chef-lieu de la province, <=2 jours)`)
+          data_plot$Couleur <- ifelse(
+            jours < 2, "vert",
+            ifelse(jours < 3, "jaune", "rouge")
+          )
+          ggplot(data_plot, aes(
+            x = Année,
+            y = jours,
+            fill = Couleur
+          )) +
+            geom_bar(stat = "identity") +
+            scale_fill_manual(values = c("rouge" = "red", "jaune" = "yellow", "vert" = "green")) +
+            labs(
+              title = paste0("Délai moyen au point de transit (", province, ")"),
+              x = "Année",
+              y = "Nombre de jours"
+            ) +
+            theme_minimal() +
+            theme(legend.position = "none")
+        })
+        
+      })
+    }
+  })
+  
+  
+  # Graphiques -------------------------------------------------------------------------------------------------------
   output$croise_bar <- renderPlot({
     kpi_bar <- kpi_df()
     ggplot(kpi_bar, aes(x = KPI, y = as.numeric(Valeur))) +
@@ -339,7 +374,7 @@ server <- function(input, output, session) {
       theme_minimal()
   })
   
-  # Table interactive
+  # Table interactive -------------------------------------------------------------------------------------------------------
   output$datatable <- renderDT({
     datatable(data_filtre(), filter = 'top', options = list(pageLength = 5, scrollX = TRUE))
   })

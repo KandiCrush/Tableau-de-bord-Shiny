@@ -26,8 +26,8 @@ df$DateRecAnt[df$DateRecAnt == as.Date("2000-06-16")] <- "2022-06-16"
 # Fonction pour générer les filtres
 filtres_ui <- function() {
   fluidRow(
-    column(3, selectInput("dps", "Provinces", choices = c("Toutes", unique(df$DPS)), selected = "Toutes")),
-    column(3, selectInput("zs", "Zone de Santé", choices = c("Toutes", unique(df$ZS)), selected = "Toutes")),
+    column(3, selectInput("dps", "Provinces", choices = c("Toutes", sort(unique(df$DPS))), selected = "Toutes")),
+    column(3, selectInput("zs", "Zone de Santé", choices = c("Toutes", sort(unique(df$ZS))), selected = "Toutes")),
     column(6, dateRangeInput("periode", "Période (2e prélèvement)", 
                              start = min(df$Prelevement2, na.rm = TRUE), 
                              end = max(df$Prelevement2, na.rm = TRUE)))
@@ -150,9 +150,9 @@ server <- function(input, output, session) {
   # Mise à jour dynamique des ZS selon la province
   observeEvent(input$dps, {
     if (input$dps == "Toutes") {
-      updateSelectInput(session, "zs", choices = c("Toutes", unique(df$ZS)), selected = "Toutes")
+      updateSelectInput(session, "zs", choices = c("Toutes", sort(unique(df$ZS))), selected = "Toutes")
     } else {
-      zs_choices <- unique(df$ZS[df$DPS == input$dps])
+      zs_choices <- sort(unique(df$ZS[df$DPS == input$dps]))
       updateSelectInput(session, "zs", choices = c("Toutes", zs_choices), selected = "Toutes")
     }
   })
@@ -309,9 +309,9 @@ server <- function(input, output, session) {
           ggplot(data_plot, aes(x = annee, y = moyenne, fill = couleur, group = 1)) +
             geom_col() +
             geom_text(aes(label = moyenne), vjust = -0.3) +
-            scale_fill_identity() +  # Utilise la couleur de la colonne "couleur" telle quelle
+            scale_fill_identity() +
             labs(
-              title = paste0("Délai moyen par an (", province, ")"),
+              title = paste0("Moyenne de jours entre le 2e prélèvement et la récéption au point de transit par an (", province, ")"),
               x = "Année",
               y = "Délai moyen (jours)"
             ) +

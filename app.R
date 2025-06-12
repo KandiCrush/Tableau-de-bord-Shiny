@@ -1,3 +1,5 @@
+source("helpers.R")
+
 library(shiny)
 library(shinydashboard)
 library(readxl)
@@ -6,52 +8,29 @@ library(ggplot2)
 library(DT)
 library(bslib)
 
+# ------------------------------------------------------------------------------------------------------------------
 df <- read_excel("data/polioData.xlsx")
-df$DateDebutParalysie <- as.Date(df$DateDebutParalysie)
 tableau_croise <- read_excel("data/polioData.xlsx", sheet = 3)
 
-# ------------------------------------------------------------------------------------------------------------------
-df_stat <- tableau_croise
-df_stat$Année <- NA
-df_stat$Province <- NA
 
-annee_en_cours <- NA
+df$Prelevement2 <- as.Date(df$Prelevement2)
+df$Prelevement2[df$Prelevement2 == ""] <- NA
+df$Prelevement2[df$Prelevement2 > Sys.Date() | df$Prelevement2 < as.Date("1990-01-01")] <- NA
 
-for (i in seq_len(nrow(df_stat))) {
-  val <- as.character(df_stat$`Étiquettes de lignes`[i])
-  if (grepl("^[0-9]{4}$", val)) {
-    annee_en_cours <- val
-  } else if (val != "Total général" && val != "") {
-    df_stat$Année[i] <- annee_en_cours
-    df_stat$Province[i] <- val
-  }
-}
 
-# Filtre pour ne garder que les lignes de province avec année non-NA
-df_stat_clean <- df_stat %>%
-  filter(!is.na(Année), !is.na(Province))
-
-# ------------------------------------------------------------------------------------------------------------------
-
-kpis <- c(
-  "Nombres des cas", 
-  "Nombres des échantillons", 
-  "moyen de jours entre le 2ième prélèvement et la réception au point de transit (chef-lieu de la province, <=2 jours)", 
-  "moyen de jours entre le 2ième prélèvement et la réception à l'INRB (<=3 jours)",
-  "% des échantillons acheminés  au point de transit (chef-lieu de la province) dans un délai <=2 jours (>=80%)", 
-  "% des échantillons reçus à l'IRNB dans un délai <=3 jours suivant le 2ième prél. (>=80%)",
-  "Taux Entero-NP (>=10)",
-  "% de selles adéquates (>=80%)"
-)
+df$DateRecAnt <- as.Date(df$DateRecAnt)
+df$DateRecAnt[df$DateRecAnt == ""] <- NA
+df$DateRecAnt[df$DateRecAnt > Sys.Date() | df$DateRecAnt < as.Date("1990-01-01")] <- NA
+df$DateRecAnt[df$DateRecAnt == as.Date("2000-06-16")] <- "2022-06-16"
 
 # Fonction pour générer les filtres
 filtres_ui <- function() {
   fluidRow(
     column(3, selectInput("dps", "Provinces", choices = c("Toutes", unique(df$DPS)), selected = "Toutes")),
     column(3, selectInput("zs", "Zone de Santé", choices = c("Toutes", unique(df$ZS)), selected = "Toutes")),
-    column(6, dateRangeInput("periode", "Période (début paralysie)", 
-                             start = min(df$DateDebutParalysie, na.rm = TRUE), 
-                             end = max(df$DateDebutParalysie, na.rm = TRUE)))
+    column(6, dateRangeInput("periode", "Période (2e prélèvement)", 
+                             start = min(df$Prelevement2, na.rm = TRUE), 
+                             end = max(df$Prelevement2, na.rm = TRUE)))
   )
 }
 
@@ -92,13 +71,22 @@ ui <- dashboardPage(
               ),
               
               fluidRow(
-                box(
-                  title = "Tableau croisé (bar chart)",
-                  width = 12,
-                  status = "primary",
-                  solidHeader = TRUE,
-                  plotOutput("croise_bar")
-                )
+                style = "padding: 0px",
+                  column(9,
+                         style = "padding: 0px",
+                         box(
+                          title = "Indicateurs",
+                          width = 12,
+                          status = "primary",
+                          solidHeader = TRUE,
+                          plotOutput("croise_bar")
+                        )
+                      ),
+                  column(3,
+                         style = "padding: 0px; padding-top: 60px",
+                    valueBoxOutput("moy_ant", width = 12),
+                    valueBoxOutput("moy_lab", width = 12),
+                  )
               ),
               
               fluidRow(
@@ -178,28 +166,35 @@ server <- function(input, output, session) {
     if (input$dps != "Toutes") {
       data <- data %>% filter(DPS == input$dps)
     }
+    
     data <- data %>%
       filter(
-        DateDebutParalysie >= input$periode[1],
-        DateDebutParalysie <= input$periode[2]
+        !is.na(Prelevement2)
+      ) %>%
+      filter(
+        Prelevement2 >= input$periode[1],
+        Prelevement2 <= input$periode[2]
       )
-    
     data
   })
   
-  table_filtre <- reactive({
-    data <- table_filtre
-    if (input$dps != "Toutes") {
-      data <- data %>% filter(`Étiquettes de lignes` == input$dps)
-    }
-    data <- data %>%
-      filter(
-        DateDebutParalysie >= input$periode[1],
-        DateDebutParalysie <= input$periode[2]
+  df_delai_annee <- reactive({
+    data_filtre() %>%
+      mutate(
+        annee = format(Prelevement2, "%Y"),
+        delai = as.numeric(difftime(DateRecAnt, Prelevement2, units = "days"))
+      ) %>%
+      filter(!is.na(annee), !is.na(delai), !is.na(DPS)) %>%
+      group_by(DPS, annee) %>%
+      summarise(
+        moyenne = round(mean(delai, na.rm = TRUE), 1),
+        .groups = "drop"
+      ) %>%
+      mutate(
+        couleur = sapply(moyenne, function(val) color_cond_min(val, 2, 3))
       )
-    
-    data
   })
+  
   
   # Tableau de bord -------------------------------------------------------------------------------------------------------
   # KPIs dynamiques
@@ -207,109 +202,120 @@ server <- function(input, output, session) {
     valueBox(nrow(data_filtre()), "Nombre de cas", icon = icon("user-injured"), color = "blue")
   })
   output$age_moyen <- renderValueBox({
-    valueBox(round(mean(data_filtre()$Age_Calcule_Annee, na.rm=TRUE),1), "Âge moyen (ans)", icon = icon("child"), color = "purple")
+    valueBox(round(mean(data_filtre()$Age_Calcule_Annee, na.rm=TRUE),1), "Âge moyen (ans)", icon = icon("child"), color = "blue")
   })
   output$female_pourcent <- renderValueBox({
     femmes <- sum(data_filtre()$Sexe == "F", na.rm=TRUE)
     total <- nrow(data_filtre())
     pourcent <- ifelse(total > 0, round(100 * femmes / total, 1), 0)
-    valueBox(paste0(pourcent, " %"), "% Filles", icon = icon("venus"), color = "yellow")
+    valueBox(paste0(pourcent, " %"), "% Filles", icon = icon("venus"), color = "blue")
   })
   output$male_pourcent <- renderValueBox({
     hommes <- sum(data_filtre()$Sexe == "M", na.rm=TRUE)
     total <- nrow(data_filtre())
     pourcent <- ifelse(total > 0, round(100 * hommes / total, 1), 0)
-    valueBox(paste0(pourcent, " %"), "% Garçons", icon = icon("mars"), color = "red")
+    valueBox(paste0(pourcent, " %"), "% Garçons", icon = icon("mars"), color = "blue")
+  })
+  
+  output$moy_ant <- renderValueBox({
+    delai <- as.numeric(difftime(data_filtre()$DateRecAnt, data_filtre()$Prelevement2, units = "days"))
+    moyenne <- round(mean(delai, na.rm = TRUE), 1)
+    
+    valueBox(moyenne,
+             "Moyenne de jours entre le 2e prélèvelement et la récéption au point de transit (<= 2)",
+             icon = icon("hourglass-half"),
+             color = color_cond_min(moyenne, 2, 3)
+    )
+  })
+  output$moy_lab <- renderValueBox({
+    delai <- as.numeric(difftime(data_filtre()$DateRecLab, data_filtre()$Prelevement2, units = "days"))
+    moyenne <- round(mean(delai, na.rm = TRUE), 1)
+    
+    valueBox(moyenne,
+             "Moyenne de jours entre le 2e prélèvelement et la récéption à l'INRB (<= 3)",
+             icon = icon("hourglass-half"),
+             color = color_cond_min(moyenne, 3, 4)
+             )
   })
 
   
   # Calcul des KPIs
   kpi_df <- reactive({
-    data <- tableau_croise %>%
-      filter(!`Étiquettes de lignes` %in% c("2022", "2023", "2024", "2025"))
-    
-    if (input$dps != "Toutes") {
-      data <- data %>% filter(`Étiquettes de lignes` == input$dps)
-    }
       
-    nb_cas <- nrow(data)
+    nb_cas <- nrow(data_filtre())
     # nb_echantillons <- sum(data$`# des échantillons`, na.rm=TRUE)
-    delai_moyen_transit <- round(mean(data$`# moyen de jours entre le 2ième prélèvement et la réception au point de transit (chef-lieu de la province, <=2 jours)`, na.rm=TRUE), 1)
-    delai_moyen_inrb <- round(mean(data$`# moyen de jours entre le 2ième prélèvement et la réception à l'INRB (<=3 jours)`, na.rm=TRUE), 1)
-    pourcent_transit_2j <- round(100 * mean(data$`% des échantillons acheminés  au point de transit (chef-lieu de la province) dans un délai <=2 jours (>=80%)`, na.rm=TRUE), 1)
-    pourcent_inrb_3j <- round(100 * mean(data$`% des échantillons reçus à l'IRNB dans un délai <=3 jours suivant le 2ième prél. (>=80%)`, na.rm=TRUE), 1)
-    taux_entero_np <- round(mean(data$`Taux Entero-NP (>=10)`, na.rm=TRUE) / nb_cas, 1)
-    pourcent_selles_adequates <- round(100 * mean(data$`%de selles adéquates (>=80%)`, na.rm=TRUE), 1)
+    delai <- as.numeric(difftime(data_filtre()$DateRecAnt, data_filtre()$Prelevement2, units = "days"))
+    pourcent_transit_2j <- round(100 * sum(delai <= 2, na.rm = TRUE) / sum(!is.na(delai)), 1)
+    
+    delai <- as.numeric(difftime(data_filtre()$DateRecLab, data_filtre()$Prelevement2, units = "days"))
+    pourcent_inrb_3j <- round(100 * sum(delai <= 2, na.rm = TRUE) / sum(!is.na(delai)), 1)
+    
+    taux_entero_np <- round(100 * (sum(data_filtre()$FinalcellcultureResult == "3-NPENT", na.rm=TRUE) / nb_cas), 1)
+    pourcent_selles_adequates <- round(100 * (sum(data_filtre()$`Echantillons Adequat` == "2", na.rm=TRUE)/ nb_cas), 1)
     
     # Noms et valeurs
     noms <- c(
-      # "Nombre de cas",
-      # "Nombre d'échantillons",
-      "Délai moyen transit (jours)",
-      "Délai moyen INRB (jours)",
-      "% transit ≤2j",
-      "% INRB ≤3j",
-      "Taux Entero-NP (%)",
+      "% transit ≤ 2 jours",
+      "% INRB ≤ 3 jours",
+      "Taux Entero-NP (>= 10%)",
       "% selles adéquates"
     )
     valeurs <- c(
-      delai_moyen_transit, delai_moyen_inrb,
       pourcent_transit_2j, pourcent_inrb_3j, taux_entero_np, pourcent_selles_adequates
     )
-    data.frame(KPI = noms, Valeur = valeurs)
+    colors <- c(
+      color_cond_max(valeurs[2],80,50),
+      color_cond_max(valeurs[4],80,50),
+      color_cond_max(valeurs[1],80,50),
+      color_cond_max(valeurs[3],10,5)
+    )
+    # print(colors)
+    data.frame(KPI = noms, Valeur = valeurs, Colors = colors)
+  })
+  output$croise_bar <- renderPlot({
+    kpi_bar <- kpi_df()
+    ggplot(kpi_bar, aes(x = KPI, y = as.numeric(Valeur), fill = KPI)) +
+      geom_bar(stat = "identity") +
+      geom_text(aes(label = paste(Valeur, " %")), vjust = -0.2, size = 5) +
+      scale_fill_manual(values = kpi_bar$Colors) +
+      labs(title = "Indicateurs clés", x = "", y = "Valeur") +
+      theme_minimal()
   })
   
   # Graphiques trimestriels -----------------------------------------------------------------------------------------------
   output$province_cards <- renderUI({
-    provinces <- unique(df_stat_clean$Province)
-    annees <- sort(unique(df_stat_clean$Année))
-    
+    provinces <- unique(df_delai_annee()$DPS)   # ou ZS
     box_list <- lapply(provinces, function(prov) {
-      data_plot <- df_stat_clean %>% filter(Province == prov, Année %in% annees)
-      
-      plot_output_id <- paste0("bar_", gsub(" ", "_", prov))
-      
+      data_plot <- df_delai_annee() %>% filter(DPS == prov)
+      plot_output_id <- paste0("delay_bar_", gsub(" ", "_", prov))
       box(
         title = prov,
         width = 12,
-        plotOutput(plot_output_id, height = 200)
+        plotOutput(plot_output_id, height = 250)
       )
     })
-    
     do.call(fluidRow, box_list)
   })
   
   # output dynamique pour chaque province
   observe({
-    provinces <- unique(df_stat_clean$Province)
-    annees <- sort(unique(df_stat_clean$Année))
-    
+    provinces <- unique(df_delai_annee()$DPS)
     for (prov in provinces) {
       local({
         province <- prov
-        plot_output_id <- paste0("bar_", gsub(" ", "_", province))
-        data_plot <- df_stat_clean %>% filter(Province == province, Année %in% annees)
-        
+        plot_output_id <- paste0("delay_bar_", gsub(" ", "_", province))
+        data_plot <- df_delai_annee() %>% filter(DPS == province)
         output[[plot_output_id]] <- renderPlot({
-          jours <- as.numeric(data_plot$`# moyen de jours entre le 2ième prélèvement et la réception au point de transit (chef-lieu de la province, <=2 jours)`)
-          data_plot$Couleur <- ifelse(
-            jours < 2, "vert",
-            ifelse(jours < 3, "jaune", "rouge")
-          )
-          ggplot(data_plot, aes(
-            x = Année,
-            y = jours,
-            fill = Couleur
-          )) +
-            geom_bar(stat = "identity") +
-            scale_fill_manual(values = c("rouge" = "red", "jaune" = "yellow", "vert" = "green")) +
+          ggplot(data_plot, aes(x = annee, y = moyenne, fill = couleur, group = 1)) +
+            geom_col() +
+            geom_text(aes(label = moyenne), vjust = -0.3) +
+            scale_fill_identity() +  # Utilise la couleur de la colonne "couleur" telle quelle
             labs(
-              title = paste0("Délai moyen au point de transit (", province, ")"),
+              title = paste0("Délai moyen par an (", province, ")"),
               x = "Année",
-              y = "Nombre de jours"
+              y = "Délai moyen (jours)"
             ) +
-            theme_minimal() +
-            theme(legend.position = "none")
+            theme_minimal()
         })
         
       })
@@ -318,14 +324,7 @@ server <- function(input, output, session) {
   
   
   # Graphiques -------------------------------------------------------------------------------------------------------
-  output$croise_bar <- renderPlot({
-    kpi_bar <- kpi_df()
-    ggplot(kpi_bar, aes(x = KPI, y = as.numeric(Valeur))) +
-      geom_bar(stat = "identity") +
-      coord_flip() +
-      labs(title = "Indicateurs clés", x = "", y = "Valeur") +
-      theme_minimal()
-  })
+
   
   
   output$courbe_temps <- renderPlot({

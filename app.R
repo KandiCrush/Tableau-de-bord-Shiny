@@ -239,7 +239,7 @@ server <- function(input, output, session) {
     valueBox(moyenne,
              "Moyenne de jours entre la récéption au point de transit et la récéption à l'INRB",
              icon = icon("hourglass-half"),
-             color = color_cond_min(moyenne, 3, 4)
+             color = color_cond_min(moyenne, 1, 2)
     )
   })
   output$moy_lab <- renderValueBox({
@@ -249,7 +249,7 @@ server <- function(input, output, session) {
     valueBox(moyenne,
              "Moyenne de jours entre le 2e prélèvelement et la récéption à l'INRB",
              icon = icon("hourglass-half"),
-             color = color_cond_min(moyenne, 3, 4)
+             color = color_cond_min(moyenne, 3, 5)
     )
   })
   

@@ -84,8 +84,9 @@ ui <- dashboardPage(
                        )
                 ),
                 column(3,
-                       style = "padding: 0px; padding-top: 60px",
+                       style = "padding: 0px;",
                        valueBoxOutput("moy_ant", width = 12),
+                       valueBoxOutput("moy_ant_lab", width = 12),
                        valueBoxOutput("moy_lab", width = 12),
                 )
               ),
@@ -226,9 +227,19 @@ server <- function(input, output, session) {
     moyenne <- round(mean(delai, na.rm = TRUE), 1)
     
     valueBox(moyenne,
-             "Moyenne de jours entre le 2e prélèvelement et la récéption au point de transit (<= 2)",
+             "Moyenne de jours entre le 2e prélèvelement et la récéption au point de transit",
              icon = icon("hourglass-half"),
              color = color_cond_min(moyenne, 2, 3)
+    )
+  })
+  output$moy_ant_lab <- renderValueBox({
+    delai <- as.numeric(difftime(data_filtre()$DateRecLab, data_filtre()$DateRecAnt, units = "days"))
+    moyenne <- round(mean(delai, na.rm = TRUE), 1)
+    
+    valueBox(moyenne,
+             "Moyenne de jours entre la récéption au point de transit et la récéption à l'INRB",
+             icon = icon("hourglass-half"),
+             color = color_cond_min(moyenne, 3, 4)
     )
   })
   output$moy_lab <- renderValueBox({
@@ -236,7 +247,7 @@ server <- function(input, output, session) {
     moyenne <- round(mean(delai, na.rm = TRUE), 1)
     
     valueBox(moyenne,
-             "Moyenne de jours entre le 2e prélèvelement et la récéption à l'INRB (<= 3)",
+             "Moyenne de jours entre le 2e prélèvelement et la récéption à l'INRB",
              icon = icon("hourglass-half"),
              color = color_cond_min(moyenne, 3, 4)
     )

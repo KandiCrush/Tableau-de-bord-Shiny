@@ -9,27 +9,20 @@ library(ggplot2)
 library(DT)
 library(bslib)
 
-# ------------------------------------------------------------------------------------------------------------------
-df <- read_excel("data/polioData.xlsx")
-tableau_croise <- read_excel("data/polioData.xlsx", sheet = 3)
-
-
-df$Prelevement2 <- as.Date(df$Prelevement2)
-df$Prelevement2[df$Prelevement2 == ""] <- NA
-df$Prelevement2[df$Prelevement2 > Sys.Date() | df$Prelevement2 < as.Date("1990-01-01")] <- NA
-
-
-df$DateRecAnt <- as.Date(df$DateRecAnt)
-df$DateRecAnt[df$DateRecAnt == ""] <- NA
-df$DateRecAnt[df$DateRecAnt > Sys.Date() | df$DateRecAnt < as.Date("1990-01-01")] <- NA
-
-df$DateRecLab <- as.Date(df$DateRecLab)
-df$DateRecLab[df$DateRecLab == ""] <- NA
-df$DateRecLab[df$DateRecLab > Sys.Date() | df$DateRecLab < as.Date("1990-01-01")] <- NA
-# df$DateRecAnt[df$DateRecAnt == as.Date("2000-06-16")] <- "2022-06-16"
-
-df <- df %>%
-  filter(DateRecAnt >= Prelevement2)
+# -- Chargement et nettoyage des données
+df <- tryCatch({
+  read_excel("data/polioData.xlsx") %>%
+    mutate(
+      Prelevement2 = as.Date(Prelevement2),
+      DateRecAnt = as.Date(DateRecAnt),
+      DateRecLab = as.Date(DateRecLab)
+    ) %>%
+    filter(Prelevement2 >= as.Date("1990-01-01") & Prelevement2 <= Sys.Date(),
+           DateRecAnt >= as.Date("1990-01-01") & DateRecAnt <= Sys.Date(),
+           DateRecAnt >= Prelevement2)
+}, error = function(e) {
+  stop("Impossible de charger les données. Vérifie ton fichier.")
+})
 
 # Fonction pour générer les filtres
 filtres_ui <- function() {
@@ -66,7 +59,7 @@ ui <- dashboardPage(
     "))
     ),
     filtres_ui(),
-      # Accueil ------------------------------------------------------------------------------------------------------------------
+    # Accueil ------------------------------------------------------------------------------------------------------------------
     tabItems(
       # Page Accueil (KPIs)
       tabItem(tabName = "accueil",
@@ -80,21 +73,21 @@ ui <- dashboardPage(
               
               fluidRow(
                 style = "padding: 0px",
-                  column(9,
-                         style = "padding: 0px",
-                         box(
-                          title = "Indicateurs",
-                          width = 12,
-                          status = "primary",
-                          solidHeader = TRUE,
-                          plotOutput("croise_bar") %>% withSpinner()
-                        )
-                      ),
-                  column(3,
-                         style = "padding: 0px; padding-top: 60px",
-                    valueBoxOutput("moy_ant", width = 12),
-                    valueBoxOutput("moy_lab", width = 12),
-                  )
+                column(9,
+                       style = "padding: 0px",
+                       box(
+                         title = "Indicateurs",
+                         width = 12,
+                         status = "primary",
+                         solidHeader = TRUE,
+                         plotOutput("croise_bar") %>% withSpinner()
+                       )
+                ),
+                column(3,
+                       style = "padding: 0px; padding-top: 60px",
+                       valueBoxOutput("moy_ant", width = 12),
+                       valueBoxOutput("moy_lab", width = 12),
+                )
               ),
               
               fluidRow(
@@ -113,28 +106,28 @@ ui <- dashboardPage(
       ),
       # Page Graphiques ---------------------------------------------------------------------------------------------------
       tabItem(tabName = "graphs",
-        # Graphiques
-        fluidRow(
-          column(7, # à gauche, l’histogramme d’âge (large)
-                 box(
-                   title = "Âge des cas", width = 12, status = "info", solidHeader = TRUE,
-                   plotOutput("age_hist", height = "calc(100vh - 250px)") %>% withSpinner(),
-                   height = "calc(100vh - 170px)",
-                 )
-          ),
-          column(5, # à droite, les deux petits graphs empilés
-                 box(
-                   title = "Répartition par Sexe", width = 12, status = "info", solidHeader = TRUE,
-                   plotOutput("sexe_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
-                   height = "calc(100vh - 505px)",
-                 ),
-                 box(
-                   title = "Répartition par Zone de Santé", width = 12, status = "info", solidHeader = TRUE,
-                   plotOutput("zone_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
-                   height = "calc(100vh - 505px)",
-                 )
-          )
-        )
+              # Graphiques
+              fluidRow(
+                column(7, # à gauche, l’histogramme d’âge (large)
+                       box(
+                         title = "Âge des cas", width = 12, status = "info", solidHeader = TRUE,
+                         plotOutput("age_hist", height = "calc(100vh - 250px)") %>% withSpinner(),
+                         height = "calc(100vh - 170px)",
+                       )
+                ),
+                column(5, # à droite, les deux petits graphs empilés
+                       box(
+                         title = "Répartition par Sexe", width = 12, status = "info", solidHeader = TRUE,
+                         plotOutput("sexe_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
+                         height = "calc(100vh - 505px)",
+                       ),
+                       box(
+                         title = "Répartition par Zone de Santé", width = 12, status = "info", solidHeader = TRUE,
+                         plotOutput("zone_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
+                         height = "calc(100vh - 505px)",
+                       )
+                )
+              )
       ),
       
       # Page DataTable ----------------------------------------------------------------------------------------------------
@@ -246,13 +239,13 @@ server <- function(input, output, session) {
              "Moyenne de jours entre le 2e prélèvelement et la récéption à l'INRB (<= 3)",
              icon = icon("hourglass-half"),
              color = color_cond_min(moyenne, 3, 4)
-             )
+    )
   })
-
+  
   
   # Calcul des KPIs
   kpi_df <- reactive({
-      
+    
     nb_cas <- nrow(data_filtre())
     # nb_echantillons <- sum(data$`# des échantillons`, na.rm=TRUE)
     delai <- as.numeric(difftime(data_filtre()$DateRecAnt, data_filtre()$Prelevement2, units = "days"))
@@ -295,13 +288,14 @@ server <- function(input, output, session) {
   
   # Graphiques trimestriels -----------------------------------------------------------------------------------------------
   output$province_cards <- renderUI({
-    provinces <- unique(df_delai_annee()$DPS)   # ou ZS
+    d <- data_filtre()
+    provinces <- unique(d$DPS)
+    if (length(provinces) == 0) return(h4("Aucune donnée à afficher."))
     box_list <- lapply(provinces, function(prov) {
-      data_plot <- df_delai_annee() %>% filter(DPS == prov)
+      data_plot <- d[d$DPS == prov, ]
       plot_output_id <- paste0("delay_bar_", gsub(" ", "_", prov))
       box(
-        title = prov,
-        width = 12,
+        title = prov, width = 12,
         plotOutput(plot_output_id, height = 250)
       )
     })
@@ -336,7 +330,7 @@ server <- function(input, output, session) {
   })
   
   
-  # Graphiques -------------------------------------------------------------------------------------------------------
+  
   output$courbe_temps <- renderPlot({
     req(nrow(data_filtre()) > 0)
     df_tps <- data_filtre() %>%
@@ -355,10 +349,19 @@ server <- function(input, output, session) {
     }
   })
   
-  
+  # Graphiques -------------------------------------------------------------------------------------------------------
+  output$age_hist <- renderPlot({
+    d <- data_filtre()
+    if (nrow(d) == 0 || !"Age_Calcule_Annee" %in% colnames(d)) {msg_aucune_donnee(); return()}
+    ggplot(d, aes(x = Age_Calcule_Annee)) +
+      geom_histogram(bins = 20, binwidth = 0.5, color = "black", fill = "grey") +
+      labs(title = "Distribution de l'âge", x = "Âge (années)", y = "Nombre de cas") +
+      theme_bw()
+  })
   output$sexe_plot <- renderPlot({
-    req(nrow(data_filtre()) > 0)
-    data_filtre() %>%
+    d <- data_filtre()
+    if (nrow(d) == 0 || !"Sexe" %in% colnames(d)) {msg_aucune_donnee(); return()}
+    d %>%
       count(Sexe) %>%
       ggplot(aes(x = Sexe, y = n, fill = Sexe)) +
       geom_bar(stat = "identity") +
@@ -366,8 +369,9 @@ server <- function(input, output, session) {
       theme_minimal()
   })
   output$zone_plot <- renderPlot({
-    req(nrow(data_filtre()) > 0)
-    data_filtre() %>%
+    d <- data_filtre()
+    if (nrow(d) == 0 || !"ZS" %in% colnames(d)) {msg_aucune_donnee(); return()}
+    d %>%
       count(ZS) %>%
       ggplot(aes(x = reorder(ZS, n), y = n)) +
       geom_bar(stat = "identity") +
@@ -375,17 +379,12 @@ server <- function(input, output, session) {
       labs(title = "Cas par Zone de Santé", x = "Zone de Santé", y = "Nombre de cas") +
       theme_minimal()
   })
-  output$age_hist <- renderPlot({
-    req(nrow(data_filtre()) > 0)
-    ggplot(data_filtre(), aes(x = Age_Calcule_Annee)) +
-      geom_histogram(bins = 20, binwidth=0.5, color="black", fill="grey") +
-      labs(title = "Distribution de l'âge", x = "Âge (années)", y = "Nombre de cas") +
-      theme_bw()
-  })
   
   # Table interactive -------------------------------------------------------------------------------------------------------
   output$datatable <- renderDT({
-    datatable(data_filtre(), filter = 'top', options = list(pageLength = 5, scrollX = TRUE))
+    d <- data_filtre()
+    if (nrow(d) == 0) return(datatable(data.frame("Aucune donnée" = character()), options = list(pageLength = 5, scrollX = TRUE)))
+    datatable(d, filter = 'top', options = list(pageLength = 5, scrollX = TRUE))
   })
   output$downloadData <- downloadHandler(
     filename = function() { "data_polio_filtre.csv" },

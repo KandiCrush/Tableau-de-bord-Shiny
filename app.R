@@ -2,6 +2,7 @@ source("helpers.R")
 
 library(shiny)
 library(shinydashboard)
+library(shinycssloaders)
 library(readxl)
 library(dplyr)
 library(ggplot2)
@@ -21,7 +22,14 @@ df$Prelevement2[df$Prelevement2 > Sys.Date() | df$Prelevement2 < as.Date("1990-0
 df$DateRecAnt <- as.Date(df$DateRecAnt)
 df$DateRecAnt[df$DateRecAnt == ""] <- NA
 df$DateRecAnt[df$DateRecAnt > Sys.Date() | df$DateRecAnt < as.Date("1990-01-01")] <- NA
-df$DateRecAnt[df$DateRecAnt == as.Date("2000-06-16")] <- "2022-06-16"
+
+df$DateRecLab <- as.Date(df$DateRecLab)
+df$DateRecLab[df$DateRecLab == ""] <- NA
+df$DateRecLab[df$DateRecLab > Sys.Date() | df$DateRecLab < as.Date("1990-01-01")] <- NA
+# df$DateRecAnt[df$DateRecAnt == as.Date("2000-06-16")] <- "2022-06-16"
+
+df <- df %>%
+  filter(DateRecAnt >= Prelevement2)
 
 # Fonction pour générer les filtres
 filtres_ui <- function() {
@@ -79,7 +87,7 @@ ui <- dashboardPage(
                           width = 12,
                           status = "primary",
                           solidHeader = TRUE,
-                          plotOutput("croise_bar")
+                          plotOutput("croise_bar") %>% withSpinner()
                         )
                       ),
                   column(3,
@@ -95,7 +103,7 @@ ui <- dashboardPage(
                   width = 12, 
                   status = "primary", 
                   solidHeader = TRUE,
-                  plotOutput("courbe_temps")
+                  plotOutput("courbe_temps") %>% withSpinner()
                 )
               )
       ),
@@ -110,19 +118,19 @@ ui <- dashboardPage(
           column(7, # à gauche, l’histogramme d’âge (large)
                  box(
                    title = "Âge des cas", width = 12, status = "info", solidHeader = TRUE,
-                   plotOutput("age_hist", height = "calc(100vh - 250px)"),
+                   plotOutput("age_hist", height = "calc(100vh - 250px)") %>% withSpinner(),
                    height = "calc(100vh - 170px)",
                  )
           ),
           column(5, # à droite, les deux petits graphs empilés
                  box(
                    title = "Répartition par Sexe", width = 12, status = "info", solidHeader = TRUE,
-                   plotOutput("sexe_plot", height = "calc(100vh - 580px)"),
+                   plotOutput("sexe_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
                    height = "calc(100vh - 505px)",
                  ),
                  box(
                    title = "Répartition par Zone de Santé", width = 12, status = "info", solidHeader = TRUE,
-                   plotOutput("zone_plot", height = "calc(100vh - 580px)"),
+                   plotOutput("zone_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
                    height = "calc(100vh - 505px)",
                  )
           )
@@ -182,10 +190,12 @@ server <- function(input, output, session) {
     data_filtre() %>%
       mutate(
         annee = format(Prelevement2, "%Y"),
+        mois  = format(Prelevement2, "%m"),
+        annee_mois = paste0(annee, "-", mois),
         delai = as.numeric(difftime(DateRecAnt, Prelevement2, units = "days"))
       ) %>%
-      filter(!is.na(annee), !is.na(delai), !is.na(DPS)) %>%
-      group_by(DPS, annee) %>%
+      filter(!is.na(annee), !is.na(mois), !is.na(delai), !is.na(DPS)) %>%
+      group_by(DPS, annee, mois, annee_mois) %>%
       summarise(
         moyenne = round(mean(delai, na.rm = TRUE), 1),
         .groups = "drop"
@@ -194,6 +204,7 @@ server <- function(input, output, session) {
         couleur = sapply(moyenne, function(val) color_cond_min(val, 2, 3))
       )
   })
+  
   
   
   # Tableau de bord -------------------------------------------------------------------------------------------------------
@@ -267,7 +278,7 @@ server <- function(input, output, session) {
       color_cond_max(valeurs[2],80,50),
       color_cond_max(valeurs[4],80,50),
       color_cond_max(valeurs[1],80,50),
-      color_cond_max(valeurs[3],10,5)
+      color_cond_max(valeurs[3],10,8)
     )
     # print(colors)
     data.frame(KPI = noms, Valeur = valeurs, Colors = colors)
@@ -306,16 +317,18 @@ server <- function(input, output, session) {
         plot_output_id <- paste0("delay_bar_", gsub(" ", "_", province))
         data_plot <- df_delai_annee() %>% filter(DPS == province)
         output[[plot_output_id]] <- renderPlot({
-          ggplot(data_plot, aes(x = annee, y = moyenne, fill = couleur, group = 1)) +
+          ggplot(data_plot, aes(x = annee_mois, y = moyenne, fill = couleur, group = 1)) +
             geom_col() +
             geom_text(aes(label = moyenne), vjust = -0.3) +
             scale_fill_identity() +
             labs(
               title = paste0("Moyenne de jours entre le 2e prélèvement et la récéption au point de transit par an (", province, ")"),
-              x = "Année",
+              x = "Année/mois",
               y = "Délai moyen (jours)"
             ) +
-            theme_minimal()
+            theme_minimal() +
+            theme(axis.text.x = element_text(angle = 45, hjust = 1))
+          
         })
         
       })
@@ -324,9 +337,6 @@ server <- function(input, output, session) {
   
   
   # Graphiques -------------------------------------------------------------------------------------------------------
-
-  
-  
   output$courbe_temps <- renderPlot({
     req(nrow(data_filtre()) > 0)
     df_tps <- data_filtre() %>%
@@ -368,9 +378,9 @@ server <- function(input, output, session) {
   output$age_hist <- renderPlot({
     req(nrow(data_filtre()) > 0)
     ggplot(data_filtre(), aes(x = Age_Calcule_Annee)) +
-      geom_histogram(bins = 20) +
+      geom_histogram(bins = 20, binwidth=0.5, color="black", fill="grey") +
       labs(title = "Distribution de l'âge", x = "Âge (années)", y = "Nombre de cas") +
-      theme_minimal()
+      theme_bw()
   })
   
   # Table interactive -------------------------------------------------------------------------------------------------------

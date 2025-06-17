@@ -8,6 +8,7 @@ library(dplyr)
 library(ggplot2)
 library(DT)
 library(bslib)
+library(plotly)
 
 # -- Chargement et nettoyage des données
 df <- tryCatch({
@@ -39,12 +40,14 @@ filtres_ui <- function() {
 
 # UI --------------------------------------------------------------------------------------------------------------------
 ui <- dashboardPage(
+  skin = "black",
   dashboardHeader(title = "PLTS"),
   dashboardSidebar(
     sidebarMenu(
       menuItem("Accueil", tabName = "accueil", icon = icon("home")),
       menuItem("Statistiques", tabName = "stats", icon = icon("chart-bar")),
-      menuItem("Graphiques", tabName = "graphs", icon = icon("chart-line")),
+      menuItem("Evolutions", tabName = "evols", icon = icon("chart-line")),
+      menuItem("Graphiques", tabName = "graphs", icon = icon("chart-simple")),
       menuItem("Données", tabName = "data", icon = icon("table"))
     )
     
@@ -78,9 +81,9 @@ ui <- dashboardPage(
                        box(
                          title = "Indicateurs",
                          width = 12,
-                         status = "primary",
+                         # status = "primary",
                          solidHeader = TRUE,
-                         plotOutput("croise_bar") %>% withSpinner()
+                         plotOutput("croise_bar", height = "450px") %>% withSpinner()
                        )
                 ),
                 column(3,
@@ -89,21 +92,23 @@ ui <- dashboardPage(
                        valueBoxOutput("moy_ant_lab", width = 12),
                        valueBoxOutput("moy_lab", width = 12),
                 )
-              ),
-              
-              fluidRow(
-                box(
-                  title = "Evolution des cas dans le temps", 
-                  width = 12, 
-                  status = "primary", 
-                  solidHeader = TRUE,
-                  plotOutput("courbe_temps") %>% withSpinner()
-                )
               )
       ),
       # Graphiques trimestriels -------------------------------------------------------------------------------------------
       tabItem(tabName = "stats",
               uiOutput("province_cards")
+      ),
+      
+      # Evolutions des cas ------------------------------------------------------------------------------------------------
+      tabItem(tabName = "evols",
+              fluidRow(
+                box(
+                  title = "Evolution des cas dans le temps", 
+                  width = 12,
+                  solidHeader = TRUE,
+                  plotlyOutput("courbe_temps", height = "550px") %>% withSpinner()
+                )
+              )
       ),
       # Page Graphiques ---------------------------------------------------------------------------------------------------
       tabItem(tabName = "graphs",
@@ -111,20 +116,20 @@ ui <- dashboardPage(
               fluidRow(
                 column(7, # à gauche, l’histogramme d’âge (large)
                        box(
-                         title = "Âge des cas", width = 12, status = "info", solidHeader = TRUE,
-                         plotOutput("age_hist", height = "calc(100vh - 250px)") %>% withSpinner(),
+                         title = "Âge des cas", width = 12, solidHeader = TRUE,
+                         plotlyOutput("age_hist", height = "calc(100vh - 250px)") %>% withSpinner(),
                          height = "calc(100vh - 170px)",
                        )
                 ),
                 column(5, # à droite, les deux petits graphs empilés
                        box(
-                         title = "Répartition par Sexe", width = 12, status = "info", solidHeader = TRUE,
-                         plotOutput("sexe_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
+                         title = "Répartition par Sexe", width = 12, solidHeader = TRUE,
+                         plotlyOutput("sexe_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
                          height = "calc(100vh - 505px)",
                        ),
                        box(
-                         title = "Répartition par Zone de Santé", width = 12, status = "info", solidHeader = TRUE,
-                         plotOutput("zone_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
+                         title = "Répartition par Zone de Santé", width = 12, solidHeader = TRUE,
+                         plotlyOutput("zone_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
                          height = "calc(100vh - 505px)",
                        )
                 )
@@ -136,7 +141,6 @@ ui <- dashboardPage(
               box(
                 title = "Table des Données",
                 width = 12,
-                status = "primary",
                 solidHeader = TRUE,
                 DTOutput("datatable"),
                 downloadButton("downloadData", "Télécharger les données filtrées")
@@ -341,55 +345,84 @@ server <- function(input, output, session) {
   })
   
   
-  
-  output$courbe_temps <- renderPlot({
-    req(nrow(data_filtre()) > 0)
+  # Evolution des cas
+  output$courbe_temps <- renderPlotly({
+    cat("Nb lignes data_filtre :", nrow(data_filtre()), "\n")
+    # Détermine dynamiquement la colonne de regroupement
+    groupName <- if (length(unique(data_filtre()$DPS)) == 1) "ZS" else "DPS"
+    
+    # On groupe sur la bonne colonne
     df_tps <- data_filtre() %>%
-      group_by(semaine = format(DateDebutParalysie, "%Y-%U")) %>%
-      summarise(N = n())
+      group_by(
+        !!sym(groupName),
+        semaine = format(DateDebutParalysie, "%Y-%U")
+      ) %>%
+      summarise(N = n(), .groups = "drop")
+    
+    cat("Nb lignes df_tps :", nrow(df_tps), "\n")
+    print(head(df_tps))
+    
     if (nrow(df_tps) < 2) {
-      plot.new()
-      text(0.5, 0.5, "Pas assez de données pour afficher la courbe")
+      plot_ly() %>% layout(title = "Pas assez de données pour afficher la courbe")
     } else {
-      ggplot(df_tps, aes(x = semaine, y = N, group = 1)) +
-        geom_line() +
-        geom_point() +
-        labs(x = "Semaine", y = "Nombre de cas", title = "Cas par semaine") +
+      df_tps$semaine <- factor(df_tps$semaine, levels = sort(unique(df_tps$semaine)))
+      p <- ggplot(df_tps, aes(x = semaine, y = N, color = !!sym(groupName), group = !!sym(groupName),
+                              text = paste0("Province : ", !!sym(groupName),
+                                            "<br>Semaine : ", semaine,
+                                            "<br>Nombre de cas : ", N))) +
+        geom_line(size = 0.3) +
+        geom_point(size = 0.5) +
+        labs(
+          x = "Semaine",
+          y = "Nombre de cas",
+          title = "Cas par semaine et par province",
+          color = "Province"
+        ) +
         theme_minimal() +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1))
+        theme(axis.text.x = element_text(angle = 45, hjust = 1),
+              legend.position = "bottom")
+      ggplotly(p, tooltip = "text")
     }
   })
   
+  
+  
   # Graphiques -------------------------------------------------------------------------------------------------------
-  output$age_hist <- renderPlot({
+  output$age_hist <- renderPlotly({
     d <- data_filtre()
-    if (nrow(d) == 0 || !"Age_Calcule_Annee" %in% colnames(d)) {msg_aucune_donnee(); return()}
-    ggplot(d, aes(x = Age_Calcule_Annee)) +
+    if (nrow(d) == 0 || !"Age_Calcule_Annee" %in% colnames(d)) {msg_aucune_donnee(); return(NULL)}
+    p <- ggplot(d, aes(x = Age_Calcule_Annee)) +
       geom_histogram(bins = 20, binwidth = 0.5, color = "black", fill = "grey") +
       labs(title = "Distribution de l'âge", x = "Âge (années)", y = "Nombre de cas") +
       theme_bw()
+    ggplotly(p)
   })
-  output$sexe_plot <- renderPlot({
+  
+  output$sexe_plot <- renderPlotly({
     d <- data_filtre()
-    if (nrow(d) == 0 || !"Sexe" %in% colnames(d)) {msg_aucune_donnee(); return()}
-    d %>%
+    if (nrow(d) == 0 || !"Sexe" %in% colnames(d)) {msg_aucune_donnee(); return(NULL)}
+    p <- d %>%
       count(Sexe) %>%
-      ggplot(aes(x = Sexe, y = n, fill = Sexe)) +
+      ggplot(aes(x = Sexe, y = n, fill = Sexe, text = paste0("Sexe : ", Sexe, "<br>Nombre : ", n))) +
       geom_bar(stat = "identity") +
       labs(title = "Répartition par Sexe", x = "Sexe", y = "Nombre de cas") +
       theme_minimal()
+    ggplotly(p, tooltip = "text")
   })
-  output$zone_plot <- renderPlot({
+  
+  output$zone_plot <- renderPlotly({
     d <- data_filtre()
-    if (nrow(d) == 0 || !"ZS" %in% colnames(d)) {msg_aucune_donnee(); return()}
-    d %>%
+    if (nrow(d) == 0 || !"ZS" %in% colnames(d)) {msg_aucune_donnee(); return(NULL)}
+    p <- d %>%
       count(ZS) %>%
-      ggplot(aes(x = reorder(ZS, n), y = n)) +
-      geom_bar(stat = "identity") +
+      ggplot(aes(x = reorder(ZS, n), y = n, text = paste0("Zone : ", ZS, "<br>Nombre : ", n))) +
+      geom_bar(stat = "identity", fill = "#3182bd") +
       coord_flip() +
       labs(title = "Cas par Zone de Santé", x = "Zone de Santé", y = "Nombre de cas") +
       theme_minimal()
+    ggplotly(p, tooltip = "text")
   })
+  
   
   # Table interactive -------------------------------------------------------------------------------------------------------
   output$datatable <- renderDT({

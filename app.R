@@ -8,6 +8,7 @@ library(dplyr)
 library(ggplot2)
 library(DT)
 library(bslib)
+library(lubridate)
 library(plotly)
 
 # -- Chargement et nettoyage des données
@@ -25,29 +26,18 @@ df <- tryCatch({
   stop("Impossible de charger les données. Vérifie ton fichier.")
 })
 
-# Fonction pour générer les filtres
-filtres_ui <- function() {
-  fluidRow(
-    column(3, selectInput("dps", "Provinces", choices = c("Toutes", sort(unique(df$DPS))), selected = "Toutes")),
-    column(3, selectInput("zs", "Zone de Santé", choices = c("Toutes", sort(unique(df$ZS))), selected = "Toutes")),
-    column(6, dateRangeInput("periode", "Période (2e prélèvement)", 
-                             start = min(df$Prelevement2, na.rm = TRUE), 
-                             end = max(df$Prelevement2, na.rm = TRUE)))
-  )
-}
-
-
+# df <- df[1:2500, ]
 
 # UI --------------------------------------------------------------------------------------------------------------------
 ui <- dashboardPage(
   skin = "black",
-  dashboardHeader(title = "PLTS"),
+  dashboardHeader(title = "PLST"),
   dashboardSidebar(
     sidebarMenu(
       menuItem("Accueil", tabName = "accueil", icon = icon("home")),
       menuItem("Statistiques", tabName = "stats", icon = icon("chart-bar")),
       menuItem("Evolutions", tabName = "evols", icon = icon("chart-line")),
-      menuItem("Graphiques", tabName = "graphs", icon = icon("chart-simple")),
+      menuItem("Répartition", tabName = "graphs", icon = icon("chart-simple")),
       menuItem("Données", tabName = "data", icon = icon("table"))
     )
     
@@ -56,47 +46,58 @@ ui <- dashboardPage(
     tags$head(
       tags$style(HTML("
       .content-wrapper, .right-side {
-        overflow-y: auto;
-        height: calc(100vh - 50px); /* 50px ≈ hauteur de l'en-tête */
+        overflow-y: hidden;
+        height: calc(100vh - 100px); /* 50px ≈ hauteur de l'en-tête */
       }
     "))
     ),
-    filtres_ui(),
+    filtres_ui(df),
     # Accueil ------------------------------------------------------------------------------------------------------------------
     tabItems(
       # Page Accueil (KPIs)
       tabItem(tabName = "accueil",
-              fluidRow(
-                valueBoxOutput("n_cas", width = 3),
-                valueBoxOutput("age_moyen", width = 3),
-                valueBoxOutput("female_pourcent", width = 3),
-                valueBoxOutput("male_pourcent", width = 3),
-                # valueBoxOutput("delai_moyen")
-              ),
+              
+                uiOutput("alert_box"),
               
               fluidRow(
                 style = "padding: 0px",
-                column(9,
+                column(7,
                        style = "padding: 0px",
                        box(
                          title = "Indicateurs",
                          width = 12,
                          # status = "primary",
                          solidHeader = TRUE,
-                         plotOutput("croise_bar", height = "450px") %>% withSpinner()
+                         height = "calc(100vh - 250px)",
+                         plotlyOutput("croise_bar", height = "calc(100vh - 340px)") %>% withSpinner()
                        )
                 ),
-                column(3,
-                       style = "padding: 0px;",
-                       valueBoxOutput("moy_ant", width = 12),
-                       valueBoxOutput("moy_ant_lab", width = 12),
-                       valueBoxOutput("moy_lab", width = 12),
-                )
+                column(5,
+                       style = "padding: 0px",
+                       box(
+                         title = "Comparaison des délais moyens",
+                         width = 12,
+                         solidHeader = TRUE,
+                         plotlyOutput("bar_delais", height = "28vh") %>% withSpinner()
+                       ),    
+                      box(
+                        width = 12,
+                        plotlyOutput("donut_sexe", height = "28vh") %>% withSpinner()
+                      ),
+                ),
+               
               )
       ),
       # Graphiques trimestriels -------------------------------------------------------------------------------------------
       tabItem(tabName = "stats",
-              uiOutput("province_cards")
+              fluidRow(
+                # style = "overflow-y: hidden; height: calc(100vh - 150px);",
+                column(
+                  12, 
+                  style = "overflow-y: scroll; height: calc(100vh - 150px);",
+                  uiOutput("province_cards")
+                )
+              )
       ),
       
       # Evolutions des cas ------------------------------------------------------------------------------------------------
@@ -106,7 +107,8 @@ ui <- dashboardPage(
                   title = "Evolution des cas dans le temps", 
                   width = 12,
                   solidHeader = TRUE,
-                  plotlyOutput("courbe_temps", height = "550px") %>% withSpinner()
+                  height = "calc(100vh - 170px)",
+                  plotlyOutput("courbe_temps", height = "calc(100vh - 250px)") %>% withSpinner()
                 )
               )
       ),
@@ -114,22 +116,25 @@ ui <- dashboardPage(
       tabItem(tabName = "graphs",
               # Graphiques
               fluidRow(
-                column(7, # à gauche, l’histogramme d’âge (large)
+                style = "padding: 0px; gap: 10px",
+                column(7, # à gauche,
+                       style = "padding: 0px",
                        box(
-                         title = "Âge des cas", width = 12, solidHeader = TRUE,
-                         plotlyOutput("age_hist", height = "calc(100vh - 250px)") %>% withSpinner(),
+                         title = "Répartition des cas", width = 12, solidHeader = TRUE,
+                         plotlyOutput("zone_plot", height = "calc(100vh - 250px)") %>% withSpinner(),
                          height = "calc(100vh - 170px)",
                        )
                 ),
                 column(5, # à droite, les deux petits graphs empilés
+                       style = "padding: 0px",
                        box(
                          title = "Répartition par Sexe", width = 12, solidHeader = TRUE,
                          plotlyOutput("sexe_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
                          height = "calc(100vh - 505px)",
                        ),
                        box(
-                         title = "Répartition par Zone de Santé", width = 12, solidHeader = TRUE,
-                         plotlyOutput("zone_plot", height = "calc(100vh - 580px)") %>% withSpinner(),
+                         title = "Âge des cas", width = 12, solidHeader = TRUE,
+                         plotlyOutput("age_hist", height = "calc(100vh - 580px)") %>% withSpinner(),
                          height = "calc(100vh - 505px)",
                        )
                 )
@@ -138,6 +143,7 @@ ui <- dashboardPage(
       
       # Page DataTable ----------------------------------------------------------------------------------------------------
       tabItem(tabName = "data",
+              style = "overflow-y: scroll; height: calc(100vh - 150px);",
               box(
                 title = "Table des Données",
                 width = 12,
@@ -162,7 +168,6 @@ server <- function(input, output, session) {
       updateSelectInput(session, "zs", choices = c("Toutes", zs_choices), selected = "Toutes")
     }
   })
-  
   data_filtre <- reactive({
     data <- unique(df)
     
@@ -183,7 +188,6 @@ server <- function(input, output, session) {
       )
     data
   })
-  
   df_delai_annee <- reactive({
     data_filtre() %>%
       mutate(
@@ -204,59 +208,126 @@ server <- function(input, output, session) {
   })
   
   
-  
   # Tableau de bord -------------------------------------------------------------------------------------------------------
-  # KPIs dynamiques
-  output$n_cas <- renderValueBox({
-    valueBox(nrow(data_filtre()), "Nombre de cas", icon = icon("user-injured"), color = "blue")
-  })
-  output$age_moyen <- renderValueBox({
-    valueBox(round(mean(data_filtre()$Age_Calcule_Annee, na.rm=TRUE),1), "Âge moyen (ans)", icon = icon("child"), color = "blue")
-  })
-  output$female_pourcent <- renderValueBox({
-    femmes <- sum(data_filtre()$Sexe == "F", na.rm=TRUE)
-    total <- nrow(data_filtre())
-    pourcent <- ifelse(total > 0, round(100 * femmes / total, 1), 0)
-    valueBox(paste0(pourcent, " %"), "% Filles", icon = icon("venus"), color = "blue")
-  })
-  output$male_pourcent <- renderValueBox({
-    hommes <- sum(data_filtre()$Sexe == "M", na.rm=TRUE)
-    total <- nrow(data_filtre())
-    pourcent <- ifelse(total > 0, round(100 * hommes / total, 1), 0)
-    valueBox(paste0(pourcent, " %"), "% Garçons", icon = icon("mars"), color = "blue")
-  })
-  
-  output$moy_ant <- renderValueBox({
-    delai <- as.numeric(difftime(data_filtre()$DateRecAnt, data_filtre()$Prelevement2, units = "days"))
-    moyenne <- round(mean(delai, na.rm = TRUE), 1)
-    
-    valueBox(moyenne,
-             "Moyenne de jours entre le 2e prélèvelement et la récéption au point de transit",
-             icon = icon("hourglass-half"),
-             color = color_cond_min(moyenne, 2, 3)
-    )
-  })
-  output$moy_ant_lab <- renderValueBox({
-    delai <- as.numeric(difftime(data_filtre()$DateRecLab, data_filtre()$DateRecAnt, units = "days"))
-    moyenne <- round(mean(delai, na.rm = TRUE), 1)
-    
-    valueBox(moyenne,
-             "Moyenne de jours entre la récéption au point de transit et la récéption à l'INRB",
-             icon = icon("hourglass-half"),
-             color = color_cond_min(moyenne, 1, 2)
-    )
-  })
-  output$moy_lab <- renderValueBox({
-    delai <- as.numeric(difftime(data_filtre()$DateRecLab, data_filtre()$Prelevement2, units = "days"))
-    moyenne <- round(mean(delai, na.rm = TRUE), 1)
-    
-    valueBox(moyenne,
-             "Moyenne de jours entre le 2e prélèvelement et la récéption à l'INRB",
-             icon = icon("hourglass-half"),
-             color = color_cond_min(moyenne, 3, 5)
+  output$alert_box <- renderUI({
+    df <- data_filtre()
+    if (nrow(df) == 0) {
+      couleur <- "#BDBDBD"
+      icon <- icon("info-circle")
+      texte <- "Aucune donnée disponible pour la période sélectionnée."
+    } else {
+      # Tes indicateurs
+      moy1 <- round(mean(as.numeric(difftime(df$DateRecAnt, df$Prelevement2, units = "days")), na.rm=TRUE), 1)
+      moy2 <- round(mean(as.numeric(difftime(df$DateRecLab, df$DateRecAnt, units = "days")), na.rm=TRUE), 1)
+      moy3 <- round(mean(as.numeric(difftime(df$DateRecLab, df$Prelevement2, units = "days")), na.rm=TRUE), 1)
+      
+      # Seuils
+      seuils <- c(3, 2, 5)
+      depasse <- c(moy1 > seuils[1], moy2 > seuils[2], moy3 > seuils[3])
+      
+      if (all(!depasse)) {
+        couleur <- "#00C49F"  # Vert
+        icon <- icon("check-circle")
+        texte <- "Tous les délais moyens sont dans les limites cibles. Aucun dépassement observé."
+      } else if (any(depasse)) {
+        couleur <- "#FFBB28"  # Orange
+        icon <- icon("exclamation-triangle")
+        indicateurs <- c("2e prélèvement → Transit", "Transit → INRB", "2e prélèvement → INRB")
+        txts <- indicateurs[which(depasse)]
+        texte <- paste0("Attention : dépassement de la cible pour : ", paste(txts, collapse = ", "), ".")
+        if (sum(depasse) > 1) couleur <- "#F44336"  # Rouge si plusieurs dépassés
+      }
+    }
+    tags$div(
+      style = paste(
+        "background-color:", couleur, ";",
+        "color: #fff;",
+        "padding: 18px;",
+        "font-size: 16px;",
+        "border-radius: 10px;",
+        "margin-bottom: 18px;",
+        "font-weight: bold;",
+        "display: flex; align-items: center;"
+      ),
+      icon, 
+      tags$span(style="margin-left: 14px;", texte)
     )
   })
   
+   # KPIs dynamiques
+  output$donut_sexe <- renderPlotly({
+    df <- data_filtre()
+    total <- nrow(df)
+    if (total == 0) {
+      return(plotly_empty())
+    }
+    count_F <- sum(df$Sexe == "F", na.rm = TRUE)
+    count_M <- sum(df$Sexe == "M", na.rm = TRUE)
+    count_autre <- total - count_F - count_M
+    labels <- c("Filles", "Garçons", "Non renseigné")
+    values <- c(count_F, count_M, count_autre)
+    colors <- c('#0088FE', '#00C49F', '#FFBB28')
+    
+    plot_ly(
+      labels = labels,
+      values = values,
+      type = 'pie',
+      hole = 0.6,
+      textinfo = 'label+percent',
+      insidetextorientation = 'radial',
+      marker = list(colors = colors, line = list(color = '#fff', width = 2))
+    ) %>%
+      layout(
+        title = list(text = paste0("Répartition par sexe"), x = 0.5),
+        showlegend = TRUE,
+        annotations = list(
+          list(
+            x = 0.5, y = 0.5, text = paste(total, "cas"), showarrow = FALSE, font = list(size = 10)
+          )
+        ),
+        margin = list(l = 30, r = 30, t = 60, b = 30)
+      )
+  })
+  output$bar_delais <- renderPlotly({
+    df <- data_filtre()
+    moy1 <- round(mean(as.numeric(difftime(df$DateRecAnt, df$Prelevement2, units = "days")), na.rm=TRUE), 1)
+    moy2 <- round(mean(as.numeric(difftime(df$DateRecLab, df$DateRecAnt, units = "days")), na.rm=TRUE), 1)
+    moy3 <- round(mean(as.numeric(difftime(df$DateRecLab, df$Prelevement2, units = "days")), na.rm=TRUE), 1)
+    
+    targets <- c(2, 3, 5) # adapte à tes propres seuils
+    
+    data <- data.frame(
+      Libelle = c("2e prélèvement → Transit", "Transit → INRB", "2e prélèvement → INRB"),
+      Moyenne = c(moy1, moy2, moy3),
+      Cible = targets
+    )
+    
+    plot_ly(
+      data,
+      x = ~Moyenne,
+      y = ~Libelle,
+      type = 'bar',
+      orientation = 'h',
+      name = 'Moyenne',
+      marker = list(color = c('#00C49F', '#0088FE', '#FFBB28'))
+    ) %>%
+      add_trace(
+        x = ~Cible,
+        y = ~Libelle,
+        type = 'violin',
+        mode = 'lines+markers',
+        name = 'Cible',
+        marker = list(symbol = "x", size = 12, color = 'red'),
+        line = list(color = 'red')
+      ) %>%
+      layout(
+        barmode = 'group',
+        title = "Délais moyens vs objectifs",
+        xaxis = list(title = "Nombre de jours"),
+        yaxis = list(title = ""),
+        legend = list(orientation = "h", x = 0.3, y = -0.5)
+      )
+  })
   
   # Calcul des KPIs
   kpi_df <- reactive({
@@ -282,29 +353,47 @@ server <- function(input, output, session) {
     valeurs <- c(
       pourcent_transit_2j, pourcent_inrb_3j, taux_entero_np, pourcent_selles_adequates
     )
+    print(valeurs)
     colors <- c(
-      color_cond_max(valeurs[2],80,50),
-      color_cond_max(valeurs[4],80,50),
-      color_cond_max(valeurs[1],80,50),
-      color_cond_max(valeurs[3],10,8)
+      color_cond_max(valeurs[1], 80, 50),
+      color_cond_max(valeurs[2], 80, 50),
+      color_cond_max(valeurs[3], 10, 8),
+      color_cond_max(valeurs[4], 80, 50)
     )
     # print(colors)
     data.frame(KPI = noms, Valeur = valeurs, Colors = colors)
+    
   })
-  output$croise_bar <- renderPlot({
+  output$croise_bar <- renderPlotly({
     kpi_bar <- kpi_df()
-    ggplot(kpi_bar, aes(x = KPI, y = as.numeric(Valeur), fill = KPI)) +
-      geom_bar(stat = "identity") +
-      geom_text(aes(label = paste(Valeur, " %")), vjust = -0.2, size = 5) +
-      scale_fill_manual(values = kpi_bar$Colors) +
-      labs(title = "Indicateurs clés", x = "", y = "Valeur") +
-      theme_minimal()
+    plot_ly(
+      data = kpi_bar,
+      x = ~KPI,
+      y = ~Valeur,
+      type = 'bar',
+      marker = list(color = ~Colors),
+      text = ~paste(Valeur, "%"),
+      textposition = 'auto',
+      hoverinfo = 'text',
+      name = 'Indicateurs'
+    ) %>%
+      layout(
+        title = "Indicateurs clés",
+        yaxis = list(title = "Valeur (%)"),
+        xaxis = list(title = ""),
+        margin = list(b = 80),
+        showlegend = FALSE
+      )
   })
   
-  # Graphiques trimestriels -----------------------------------------------------------------------------------------------
-  output$province_cards <- renderUI({
+
+  
+  # Graphiques statistiques -----------------------------------------------------------------------------------------------
+
+  
+    output$province_cards <- renderUI({
     d <- data_filtre()
-    provinces <- unique(d$DPS)
+    provinces <- sort(unique(d$DPS))
     if (length(provinces) == 0) return(h4("Aucune donnée à afficher."))
     box_list <- lapply(provinces, function(prov) {
       data_plot <- d[d$DPS == prov, ]
@@ -316,7 +405,6 @@ server <- function(input, output, session) {
     })
     do.call(fluidRow, box_list)
   })
-  
   # output dynamique pour chaque province
   observe({
     provinces <- unique(df_delai_annee()$DPS)
@@ -345,38 +433,36 @@ server <- function(input, output, session) {
   })
   
   
-  # Evolution des cas
+  # Evolution des cas -----------------------------------------------------------------------------------------------------
   output$courbe_temps <- renderPlotly({
     cat("Nb lignes data_filtre :", nrow(data_filtre()), "\n")
-    # Détermine dynamiquement la colonne de regroupement
     groupName <- if (length(unique(data_filtre()$DPS)) == 1) "ZS" else "DPS"
     
-    # On groupe sur la bonne colonne
     df_tps <- data_filtre() %>%
       group_by(
         !!sym(groupName),
-        semaine = format(DateDebutParalysie, "%Y-%U")
+        mois = format(DateDebutParalysie, "%Y-%m")
       ) %>%
       summarise(N = n(), .groups = "drop")
     
     cat("Nb lignes df_tps :", nrow(df_tps), "\n")
-    print(head(df_tps))
+    # print(head(df_tps))
     
     if (nrow(df_tps) < 2) {
       plot_ly() %>% layout(title = "Pas assez de données pour afficher la courbe")
     } else {
-      df_tps$semaine <- factor(df_tps$semaine, levels = sort(unique(df_tps$semaine)))
-      p <- ggplot(df_tps, aes(x = semaine, y = N, color = !!sym(groupName), group = !!sym(groupName),
+      df_tps$mois <- factor(df_tps$mois, levels = sort(unique(df_tps$mois)))
+      p <- ggplot(df_tps, aes(x = mois, y = N, color = !!sym(groupName), group = !!sym(groupName),
                               text = paste0("Province : ", !!sym(groupName),
-                                            "<br>Semaine : ", semaine,
+                                            "<br>Mois : ", mois,
                                             "<br>Nombre de cas : ", N))) +
         geom_line(size = 0.3) +
         geom_point(size = 0.5) +
         labs(
-          x = "Semaine",
+          x = "Mois",
           y = "Nombre de cas",
-          title = "Cas par semaine et par province",
-          color = "Province"
+          title = "Cas par mois et par province ou par zone de santé",
+          color = if (length(unique(data_filtre()$DPS)) == 1) "Zones de santé" else "Provinces"
         ) +
         theme_minimal() +
         theme(axis.text.x = element_text(angle = 45, hjust = 1),
@@ -384,7 +470,6 @@ server <- function(input, output, session) {
       ggplotly(p, tooltip = "text")
     }
   })
-  
   
   
   # Graphiques -------------------------------------------------------------------------------------------------------
@@ -397,7 +482,6 @@ server <- function(input, output, session) {
       theme_bw()
     ggplotly(p)
   })
-  
   output$sexe_plot <- renderPlotly({
     d <- data_filtre()
     if (nrow(d) == 0 || !"Sexe" %in% colnames(d)) {msg_aucune_donnee(); return(NULL)}
@@ -409,16 +493,17 @@ server <- function(input, output, session) {
       theme_minimal()
     ggplotly(p, tooltip = "text")
   })
-  
   output$zone_plot <- renderPlotly({
+    groupZone <- if (length(unique(data_filtre()$DPS)) == 1) "ZS" else "DPS"
+    val <- if (length(unique(data_filtre()$DPS)) == 1) TRUE else FALSE
     d <- data_filtre()
     if (nrow(d) == 0 || !"ZS" %in% colnames(d)) {msg_aucune_donnee(); return(NULL)}
     p <- d %>%
-      count(ZS) %>%
-      ggplot(aes(x = reorder(ZS, n), y = n, text = paste0("Zone : ", ZS, "<br>Nombre : ", n))) +
+      count(!!sym(groupZone)) %>%
+      ggplot(aes(x = reorder(!!sym(groupZone), n), y = n, text = paste0(if(val) "Zone : " else "Province : ", !!sym(groupZone), "<br>Nombre : ", n))) +
       geom_bar(stat = "identity", fill = "#3182bd") +
       coord_flip() +
-      labs(title = "Cas par Zone de Santé", x = "Zone de Santé", y = "Nombre de cas") +
+      labs(title = if(val) "Cas par Zone de Santé" else "Cas par Province", x = if(val) "Zone de Santé" else "Province", y = "Nombre de cas") +
       theme_minimal()
     ggplotly(p, tooltip = "text")
   })
